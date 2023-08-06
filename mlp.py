@@ -16,6 +16,12 @@ class MLP:
         self.layer1 = self.sigmoid(np.dot(X, self.weights1) + self.bias1)
         self.output = self.sigmoid(np.dot(self.layer1, self.weights2) + self.bias2)
         return self.output
+    
+    def hidden_activation(self, X):
+        # Compute the activation of the hidden layer
+        hidden_layer_activation = self.sigmoid(np.dot(X, self.weights1) + self.bias1)
+        return hidden_layer_activation
+
 
     def backward(self, X, y, output):
         # Compute the gradients
