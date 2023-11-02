@@ -7,11 +7,13 @@ class ActivationFunction(Enum):
     RELU = 3
     
 class MLP:
-    def __init__(self, input_size, hidden_size, output_size, learning_rate=0.1, activation_function=ActivationFunction.SIGMOID):
+    def __init__(self, input_size, hidden_size, output_size, learning_rate=0.1, activation_function=ActivationFunction.SIGMOID, use_momentum=False, momentum_factor=0.9):
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.output_size = output_size
         self.learning_rate = learning_rate
+        self.use_momentum = use_momentum
+        self.momentum_factor = momentum_factor
         if activation_function not in ActivationFunction:
             raise ValueError("Unsupported activation function")
         self.activation_function = activation_function
@@ -26,6 +28,13 @@ class MLP:
 
         self.bias1 = np.random.rand(self.hidden_size)
         self.bias2 = np.random.rand(self.output_size)
+
+        # Initialize momentum variables
+        if self.use_momentum:
+            self.momentum_weights1 = np.zeros_like(self.weights1)
+            self.momentum_weights2 = np.zeros_like(self.weights2)
+            self.momentum_bias1 = np.zeros_like(self.bias1)
+            self.momentum_bias2 = np.zeros_like(self.bias2)
 
     def forward(self, X):
         self.layer1 = self.activate(np.dot(X, self.weights1) + self.bias1)
@@ -60,9 +69,15 @@ class MLP:
         d_weights2 = np.dot(self.layer1.T, (2 * (y - output) * self.activate_derivative(output)))
         d_weights1 = np.dot(X.T, (np.dot(2 * (y - output) * self.activate_derivative(output), self.weights2.T) * self.activate_derivative(self.layer1)))
 
-        # Update the weights
-        self.weights2 += self.learning_rate * d_weights2
-        self.weights1 += self.learning_rate * d_weights1
+        # Update the weights with momentum
+        if self.use_momentum:
+            self.momentum_weights1 = self.momentum_factor * self.momentum_weights1 + self.learning_rate * d_weights1
+            self.weights1 += self.momentum_weights1
+            self.momentum_weights2 = self.momentum_factor * self.momentum_weights2 + self.learning_rate * d_weights2
+            self.weights2 += self.momentum_weights2
+        else:
+            self.weights1 += self.learning_rate * d_weights1
+            self.weights2 += self.learning_rate * d_weights2
 
     def train(self, X_train, y_train, X_val, y_val, epochs):
         training_accuracies = []
