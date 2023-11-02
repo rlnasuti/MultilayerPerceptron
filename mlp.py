@@ -7,16 +7,19 @@ class ActivationFunction(Enum):
     RELU = 3
     
 class MLP:
-    def __init__(self, input_size, hidden_size, output_size, learning_rate=0.1, activation_function=ActivationFunction.SIGMOID, use_momentum=False, momentum_factor=0.9):
+    def __init__(self, input_size, hidden_size, output_size, learning_rate=0.1, activation_function=ActivationFunction.SIGMOID, use_adam=False, beta1=0.9, beta2=0.999, epsilon=1e-8):
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.output_size = output_size
         self.learning_rate = learning_rate
-        self.use_momentum = use_momentum
-        self.momentum_factor = momentum_factor
+
         if activation_function not in ActivationFunction:
             raise ValueError("Unsupported activation function")
         self.activation_function = activation_function
+        self.use_adam = use_adam
+        self.beta1 = beta1
+        self.beta2 = beta2
+        self.epsilon = epsilon
 
         # He/Kaiming initialization for ReLU, otherwise use normal random initialization
         if self.activation_function == ActivationFunction.RELU:
@@ -29,12 +32,17 @@ class MLP:
         self.bias1 = np.random.rand(self.hidden_size)
         self.bias2 = np.random.rand(self.output_size)
 
-        # Initialize momentum variables
-        if self.use_momentum:
-            self.momentum_weights1 = np.zeros_like(self.weights1)
-            self.momentum_weights2 = np.zeros_like(self.weights2)
-            self.momentum_bias1 = np.zeros_like(self.bias1)
-            self.momentum_bias2 = np.zeros_like(self.bias2)
+        if self.use_adam:
+            # Initialize first and second moment variables for Adam
+            self.m_weights1 = np.zeros_like(self.weights1)
+            self.m_weights2 = np.zeros_like(self.weights2)
+            self.m_bias1 = np.zeros_like(self.bias1)
+            self.m_bias2 = np.zeros_like(self.bias2)
+
+            self.v_weights1 = np.zeros_like(self.weights1)
+            self.v_weights2 = np.zeros_like(self.weights2)
+            self.v_bias1 = np.zeros_like(self.bias1)
+            self.v_bias2 = np.zeros_like(self.bias2)
 
     def forward(self, X):
         self.layer1 = self.activate(np.dot(X, self.weights1) + self.bias1)
@@ -64,20 +72,48 @@ class MLP:
     def hidden_activation(self, X):
         return self.activate(np.dot(X, self.weights1) + self.bias1)
 
-    def backward(self, X, y, output):
-        # Compute the gradients
-        d_weights2 = np.dot(self.layer1.T, (2 * (y - output) * self.activate_derivative(output)))
-        d_weights1 = np.dot(X.T, (np.dot(2 * (y - output) * self.activate_derivative(output), self.weights2.T) * self.activate_derivative(self.layer1)))
+    def backward(self, X, y, output, t):
+        # Error in the output layer
+        output_error = y - output  # Shape: (number of samples, output_size)
+        
+        # Gradient for output layer biases
+        d_bias2 = np.sum(output_error * self.activate_derivative(output), axis=0)
+        
+        # Error in the first hidden layer
+        hidden_error = np.dot(output_error, self.weights2.T) * self.activate_derivative(self.layer1)  # Shape: (number of samples, hidden_size)
+        
+        # Gradient for first layer biases
+        d_bias1 = np.sum(hidden_error, axis=0)
 
-        # Update the weights with momentum
-        if self.use_momentum:
-            self.momentum_weights1 = self.momentum_factor * self.momentum_weights1 + self.learning_rate * d_weights1
-            self.weights1 += self.momentum_weights1
-            self.momentum_weights2 = self.momentum_factor * self.momentum_weights2 + self.learning_rate * d_weights2
-            self.weights2 += self.momentum_weights2
-        else:
-            self.weights1 += self.learning_rate * d_weights1
-            self.weights2 += self.learning_rate * d_weights2
+        # Compute the gradients for weights
+        d_weights2 = np.dot(self.layer1.T, (2 * output_error * self.activate_derivative(output)))
+        d_weights1 = np.dot(X.T, (2 * hidden_error * self.activate_derivative(self.layer1)))
+
+        if self.use_adam:
+            self.m_weights1 = self.beta1 * self.m_weights1 + (1 - self.beta1) * d_weights1
+            self.m_weights2 = self.beta1 * self.m_weights2 + (1 - self.beta1) * d_weights2
+            self.m_bias1 = self.beta1 * self.m_bias1 + (1 - self.beta1) * d_bias1
+            self.m_bias2 = self.beta1 * self.m_bias2 + (1 - self.beta1) * d_bias2
+
+            self.v_weights1 = self.beta2 * self.v_weights1 + (1 - self.beta2) * (d_weights1 ** 2)
+            self.v_weights2 = self.beta2 * self.v_weights2 + (1 - self.beta2) * (d_weights2 ** 2)
+            self.v_bias1 = self.beta2 * self.v_bias1 + (1 - self.beta2) * (d_bias1 ** 2)
+            self.v_bias2 = self.beta2 * self.v_bias2 + (1 - self.beta2) * (d_bias2 ** 2)
+
+            m_hat_weights1 = self.m_weights1 / (1 - self.beta1 ** t )
+            m_hat_weights2 = self.m_weights2 / (1 - self.beta1 ** t )
+            m_hat_bias1 = self.m_bias1 / (1 - self.beta1 ** t )
+            m_hat_bias2 = self.m_bias2 / (1 - self.beta1 ** t )
+
+            v_hat_weights1 = self.v_weights1 / (1 - self.beta2 ** t )
+            v_hat_weights2 = self.v_weights2 / (1 - self.beta2 ** t )
+            v_hat_bias1 = self.v_bias1 / (1 - self.beta2 ** t )
+            v_hat_bias2 = self.v_bias2 / (1 - self.beta2 ** t )
+
+            self.weights1 += self.learning_rate * m_hat_weights1 / (np.sqrt(v_hat_weights1) + self.epsilon)
+            self.weights2 += self.learning_rate * m_hat_weights2 / (np.sqrt(v_hat_weights2) + self.epsilon)
+            self.bias1 += self.learning_rate * m_hat_bias1 / (np.sqrt(v_hat_bias1) + self.epsilon)
+            self.bias2 += self.learning_rate * m_hat_bias2 / (np.sqrt(v_hat_bias2) + self.epsilon)
 
     def train(self, X_train, y_train, X_val, y_val, epochs):
         training_accuracies = []
@@ -88,7 +124,7 @@ class MLP:
         for epoch in range(epochs):
             # Training
             output_train = self.forward(X_train)
-            self.backward(X_train, y_train, output_train)
+            self.backward(X_train, y_train, output_train, epoch+1)
             train_accuracy = self.calculate_accuracy(output_train, y_train)
             train_loss = self.calculate_loss(output_train, y_train)
             training_accuracies.append(train_accuracy)
